@@ -29,15 +29,13 @@ else
 fi
 
 # 检查 Realm 是否已安装
-if [ -f "$NEW_INSTALL_DIR/realm" ]; then
-    echo "检测到 Realm 已安装。"
-    realm_status="已安装"
-    realm_status_color="\033[0;32m" # 绿色
-else
-    echo "Realm 未安装。"
-    realm_status="未安装"
-    realm_status_color="\033[0;31m" # 红色
-fi
+is_realm_installed() {
+    if [ -f "$NEW_INSTALL_DIR/realm" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
 
 # 检查 Realm 服务状态
 check_realm_service_status() {
@@ -51,7 +49,17 @@ check_realm_service_status() {
 # 获取本地 Realm 版本
 get_local_realm_version() {
     if [ -f "$NEW_INSTALL_DIR/realm" ]; then
-        local_version=$($NEW_INSTALL_DIR/realm -v)
+        local_version=$($NEW_INSTALL_DIR/realm -v 2>/dev/null)
+        if [ -z "$local_version" ]; then
+            local_version=$($NEW_INSTALL_DIR/realm --version 2>/dev/null)
+        fi
+        if [ -z "$local_version" ]; then
+            if [ -f "$NEW_INSTALL_DIR/VERSION" ]; then
+                local_version=$(cat "$NEW_INSTALL_DIR/VERSION")
+            else
+                local_version="未知版本"
+            fi
+        fi
         echo "本地 Realm 版本为: ${local_version}"
     else
         local_version="未安装"
@@ -61,7 +69,10 @@ get_local_realm_version() {
 
 # 获取最新版本号
 get_latest_realm_version() {
-    latest_version=$(curl -s $GITHUB_URL | grep 'tag_name' | cut -d\" -f4)
+    latest_version=$(curl -s https://api.github.com/repos/zhboner/realm/releases/latest | grep 'tag_name' | cut -d\" -f4)
+    if [ -z "$latest_version" ]; then
+        latest_version="无法获取最新版本"
+    fi
     echo "最新的 Realm 版本为: ${latest_version}"
 }
 
@@ -98,7 +109,6 @@ download_realm() {
 
     wget -O realm.tar.gz "$download_url" || {
         echo "下载出现网络异常，请检查网络连接。"
-        read -p "按任意键返回菜单首页..." key
         return 1
     }
 }
@@ -109,15 +119,29 @@ show_menu() {
     echo "欢迎使用 Realm 一键转发脚本"
     echo "================="
     echo "1. 部署环境"
-    echo "2. 添加转发"
-    echo "3. 删除转发"
-    echo "4. 启动服务"
-    echo "5. 停止服务"
-    echo "6. 一键卸载"
-    echo "7. 更新 Realm"
+    if is_realm_installed; then
+        echo "2. 添加转发"
+        echo "3. 删除转发"
+        echo "4. 启动服务"
+        echo "5. 停止服务"
+        echo "6. 一键卸载"
+        echo "7. 更新 Realm"
+    else
+        echo "2. 添加转发 (需要先安装)"
+        echo "3. 删除转发 (需要先安装)"
+        echo "4. 启动服务 (需要先安装)"
+        echo "5. 停止服务 (需要先安装)"
+        echo "6. 一键卸载 (需要先安装)"
+        echo "7. 更新 Realm (需要先安装)"
+    fi
     echo "8. 设置 GitHub 加速地址"
+    echo "9. 退出脚本"
     echo "================="
-    echo -e "Realm 状态：${realm_status_color}${realm_status}\033[0m"
+    if is_realm_installed; then
+        echo -e "Realm 状态：\033[0;32m已安装\033[0m"
+    else
+        echo -e "Realm 状态：\033[0;31m未安装\033[0m"
+    fi
     echo -n "Realm 转发状态："
     check_realm_service_status
     echo "当前 GitHub 加速地址：${ACCELERATE_URL:-无}"
@@ -187,9 +211,6 @@ uninstall_realm() {
     systemctl daemon-reload
     rm -rf $NEW_INSTALL_DIR
     echo "Realm 已被卸载。"
-    # 更新 Realm 状态变量
-    realm_status="未安装"
-    realm_status_color="\033[0;31m" # 红色
 }
 
 # 删除转发规则的函数
@@ -293,25 +314,53 @@ while true; do
             deploy_realm
             ;;
         2)
-            add_forward
+            if is_realm_installed; then
+                add_forward
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         3)
-            delete_forward
+            if is_realm_installed; then
+                delete_forward
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         4)
-            start_service
+            if is_realm_installed; then
+                start_service
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         5)
-            stop_service
+            if is_realm_installed; then
+                stop_service
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         6)
-            uninstall_realm
+            if is_realm_installed; then
+                uninstall_realm
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         7)
-            update_realm
+            if is_realm_installed; then
+                update_realm
+            else
+                echo "请先安装 Realm。"
+            fi
             ;;
         8)
             set_accelerate_url
+            ;;
+        9)
+            echo "退出脚本。"
+            exit 0
             ;;
         *)
             echo "无效选项: $choice"
