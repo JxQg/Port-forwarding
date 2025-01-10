@@ -7,9 +7,14 @@ OLD_INSTALL_DIR="/root/realm"
 
 # 设置默认的 GitHub 地址
 GITHUB_URL="https://github.com/zhboner/realm/releases/latest"
-
 # 用户自定义的 GitHub 加速地址
 ACCELERATE_URL=""
+# 当前脚本版本号
+SCRIPT_VERSION="0.0.1"
+# 存储远程脚本版本号的临时文件
+REMOTE_VERSION_FILE="/tmp/realm_onekey_remote_version.txt"
+# 脚本文件的 URL
+SCRIPT_URL="https://raw.githubusercontent.com/Jaydooooooo/Port-forwarding/main/RealmOneKey.sh"
 
 # 检查旧路径是否存在
 if [ -d "$OLD_INSTALL_DIR" ]; then
@@ -76,6 +81,32 @@ get_latest_realm_version() {
     echo "最新的 Realm 版本为: ${latest_version}"
 }
 
+# 获取远程脚本版本号
+check_script_version() {
+    # 处理加速地址的斜杠问题
+    accelerate_url=$(echo "$ACCELERATE_URL" | sed 's:/*$::')
+
+    # 尝试使用加速地址获取远程版本号
+    if [ -n "$ACCELERATE_URL" ]; then
+        remote_version=$(curl -s "$accelerate_url/$SCRIPT_URL" | grep -m 1 'SCRIPT_VERSION=' | cut -d '"' -f 2)
+    fi
+
+    # 如果加速地址不可用，使用原始地址获取远程版本号
+    if [ -z "$remote_version" ]; then
+        remote_version=$(curl -s "$SCRIPT_URL" | grep -m 1 'SCRIPT_VERSION=' | cut -d '"' -f 2)
+    fi
+
+    if [ -z "$remote_version" ]; then
+        return 1
+    else
+        echo "$remote_version" > $REMOTE_VERSION_FILE
+        return 0
+    fi
+}
+
+# 版本比较函数
+version_gt() { test "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1"; }
+
 # 检查 CPU 架构并下载相应的 Realm 包
 download_realm() {
     arch=$(uname -m)
@@ -98,10 +129,11 @@ download_realm() {
             ;;
     esac
 
+    # 处理加速地址的斜杠问题
+    accelerate_url=$(echo "$ACCELERATE_URL" | sed 's:/*$::')
+
     # 使用加速地址下载
     if [ -n "$ACCELERATE_URL" ]; then
-        # 处理加速地址的斜杠问题
-        accelerate_url=$(echo "$ACCELERATE_URL" | sed 's:/*$::')
         download_url="$accelerate_url/https://github.com/zhboner/realm/releases/download/${latest_version}/${package}"
     else
         download_url="https://github.com/zhboner/realm/releases/download/${latest_version}/${package}"
@@ -135,7 +167,8 @@ show_menu() {
         echo "7. 更新 Realm (需要先安装)"
     fi
     echo "8. 设置 GitHub 加速地址"
-    echo "9. 退出脚本"
+    echo "9. 更新脚本"
+    echo "10. 退出脚本"
     echo "================="
     if is_realm_installed; then
         echo -e "Realm 状态：\033[0;32m已安装\033[0m"
@@ -145,6 +178,19 @@ show_menu() {
     echo -n "Realm 转发状态："
     check_realm_service_status
     echo "当前 GitHub 加速地址：${ACCELERATE_URL:-无}"
+    echo "当前脚本版本：${SCRIPT_VERSION}"
+    if check_script_version; then
+        remote_version=$(cat $REMOTE_VERSION_FILE)
+        if version_gt $remote_version $SCRIPT_VERSION; then
+            echo -e "脚本版本：\033[0;31m有更新可用\033[0m"
+        elif version_gt $SCRIPT_VERSION $remote_version; then
+            echo -e "脚本版本：\033[0;33m有可用的旧版本\033[0m"
+        else
+            echo -e "脚本版本：\033[0;32m已是最新\033[0m"
+        fi
+    else
+        echo "无法获取最新脚本版本。"
+    fi
 }
 
 # 部署环境的函数
@@ -199,6 +245,20 @@ update_realm() {
     fi
 }
 
+# 更新脚本
+update_script() {
+    # 处理加速地址的斜杠问题
+    accelerate_url=$(echo "$ACCELERATE_URL" | sed 's:/*$::')
+
+    if [ -n "$ACCELERATE_URL" ]; then
+        wget -O RealmOneKey.sh "$accelerate_url/$SCRIPT_URL" && chmod +x RealmOneKey.sh
+    else
+        wget -O RealmOneKey.sh "$SCRIPT_URL" && chmod +x RealmOneKey.sh
+    fi
+    echo "脚本已更新到最新版本。请重新运行脚本。"
+    exit 0
+}
+
 # 卸载 Realm
 uninstall_realm() {
     if [ "$EUID" -ne 0 ]; then
@@ -230,7 +290,7 @@ delete_forward() {
 
     echo "请输入要删除的转发规则序号，直接按回车返回主菜单。"
     read -p "选择: " choice
-    if [ -z "$choice" ]; then
+    if [ -z "$choice" ];then
         echo "返回主菜单。"
         return
     fi
@@ -359,6 +419,23 @@ while true; do
             set_accelerate_url
             ;;
         9)
+            if check_script_version; then
+                remote_version=$(cat $REMOTE_VERSION_FILE)
+                if version_gt $remote_version $SCRIPT_VERSION; then
+                    update_script
+                elif version_gt $SCRIPT_VERSION $remote_version; then
+                    read -p "远程版本比本地版本旧。是否回滚更新？ (Y/N): " rollback_choice
+                    if [[ $rollback_choice == "Y" || $rollback_choice == "y" ]]; then
+                        update_script
+                    fi
+                else
+                    echo "脚本已是最新版本。"
+                fi
+            else
+                echo "无法获取最新脚本版本。"
+            fi
+            ;;
+        10)
             echo "退出脚本。"
             exit 0
             ;;
